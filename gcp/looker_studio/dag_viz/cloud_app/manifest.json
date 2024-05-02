@@ -1,0 +1,18 @@
+{
+    "name": "network vizjs",
+    "organization": "COMPANY",
+    "description": "...",
+    "devMode": true,
+    "components": [
+      {
+        "id": "COMPANY-GRAFO",
+        "name": "prod-grafo",
+        "description": "Un javascript code que espera 2 columnas: nodo y su dependencia; y construye una red usando visjs-network",
+        "resource": {
+          "js": "gs://bucket/dagViz_prod/index.js",
+          "config": "gs://bucket/dagViz_prod/index.json",
+          "css": "gs://bucket/dagViz_prod/index.css"
+        }
+      }
+    ]
+}

@@ -1,0 +1,27 @@
+{
+    "data": [
+        {
+            "id": "concepts",
+            "label": "Concepts",
+            "elements": [
+                {
+                    "id": "tableDimension",
+                    "label": "Dimension",
+                    "type": "DIMENSION",
+                    "options": {
+                        "min": 2,
+                        "max": 12
+                    }
+                }
+            ]
+        }
+    ],
+    "interactions": [
+        {
+            "id": "onClick",
+            "supportedActions": [
+                "FILTER"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+fastapi==0.110.0
+google-cloud-dataform==0.5.8
+google-cloud-datastore==2.19.0
+uvicorn[standard]==0.27.1
+gunicorn==21.2.0

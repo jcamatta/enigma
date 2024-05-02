@@ -1,0 +1,118 @@
+
+main:
+  params: [event]
+  steps:
+    - init:
+        assign:
+          - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - region: ${sys.get_env("REGION")}
+          - desencriptarURL: ${sys.get_env("CF_DESENCRIPTAR")}
+          - template: ${sys.get_env("TEMPLATE")}
+          - tempLocation: ${sys.get_env("TEMP_LOCATION")}
+          - invokeDataformURL: ${sys.get_env("CR_DATAFORM")}
+    - Desencriptar:
+        call: http.post
+        args:
+          url: ${desencriptarURL}
+          body:
+            bucket: ${event.data.bucket}
+            name: ${event.data.name}
+          auth:
+            type: OIDC
+            audience: ${desencriptarURL}
+        result: desencriptarResponse
+    - ExecuteFlexTemplateJob:
+        call: LaunchDataflow
+        args:
+          project: ${project}
+          region: ${region}
+          template: ${template}
+          inputParam: '${"gs://" + desencriptarResponse.body.bucket + "/" + desencriptarResponse.body.name}'
+          tempLocation: ${tempLocation}
+          source: ${desencriptarResponse.body.source}
+        result: jobId
+    - WaitUntilFinish:
+        call: DataflowWaitUntilStatus
+        args:
+          project: ${project}
+          region: ${region}
+          jobId: ${jobId}
+          status: "JOB_STATE_DONE"
+    - InvokeDataform:
+        call: http.get
+        args:
+            url: ${invokeDataformURL}
+            query:
+                source: ${desencriptarResponse.body.source}
+            auth:
+                type: OIDC
+        result: crResponse
+    - returnOutput:
+            return: ${crResponse.body}
+
+
+LaunchDataflow:
+  params: [project, region, template, inputParam, tempLocation, source]
+  steps:
+    - launch:
+        call: http.post
+        args:
+          url: '${"https://dataflow.googleapis.com/v1b3/projects/" + project + "/locations/" + region + "/flexTemplates:launch"}'
+          auth:
+            type: OAuth2
+          body:
+            launchParameter:
+              jobName: '${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + "-" + text.replace_all(source, "_", "-")}'
+              parameters:
+                input: ${inputParam}
+              environment:
+                numWorkers: 1
+                maxWorkers: 2
+                tempLocation: ${tempLocation}
+                machineType: "e2-standard-2"
+              containerSpecGcsPath: ${template}
+        result: dataflowResponse
+        next: jobCreated
+    - jobCreated:
+        return: ${dataflowResponse.body.job.id}
+
+DataflowWaitUntilStatus:
+  params: [project, region, jobId, status]
+  steps:
+    - init:
+        assign:
+          - currentState: ""
+          - failureStates: ["JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_UPDATED", "JOB_STATE_DRAINED"]
+    - checkCondition:
+        switch:
+          - condition: ${currentState in failureStates}
+            next: exitFailure
+          - condition: ${currentState != status}
+            next: iterate
+        next: exitSuccess
+    - iterate:
+        steps:
+          - sleep:
+              call: sys.sleep
+              args:
+                seconds: 60
+          - getJob:
+              call: http.get
+              args:
+                url: '${"https://dataflow.googleapis.com/v1b3/projects/" + project + "/locations/" + region + "/jobs/" + jobId}'
+                auth:
+                  type: OAuth2
+              result: jobResponse
+          - getStatus:
+              assign:
+                - currentState: ${jobResponse.body.currentState}
+          - log:
+              call: sys.log
+              args:
+                text: '${"Current state of dataflowJob (" + jobId + "): " + currentState}'
+                severity: INFO
+        next: checkCondition
+    - exitSuccess:
+        return: ${currentState}
+    - exitFailure:
+        raise: '${"Failed dataflowJob (" + jobId + ") with status: " + currentState}'

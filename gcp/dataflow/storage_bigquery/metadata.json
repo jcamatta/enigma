@@ -1,0 +1,12 @@
+{
+    "name": "direct_gcs_bq",
+    "description": "Recibe el gcs path de un archivo y lo carga en un dataset en bigquery. El nombre de la tabla y el dataset en bigquery se definen en el modelo asociado al archivo con las propiedades __tablename__ y __dataset__ respectivamente. A su vez, las propiedades de truncar o append se usa la propiedad __write_disposition__",
+    "parameters": [
+        {
+            "name":"input",
+            "label":"GCSPath",
+            "helpText": "Google Cloud Storage Path del archivo en formato gs://bucket/folder/...",
+            "isOptional": false
+        }
+   ]
+}
