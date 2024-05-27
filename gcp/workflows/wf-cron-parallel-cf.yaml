@@ -1,0 +1,52 @@
+# call in PARALLEL a cloud function by setting in each iteration the endpoint query parameters.
+# can be trigger by a cloud scheduler making it a cron job.
+
+main:
+    params: [args]
+    steps:
+        - init:
+            assign:
+                - cloudFunctionUrl: ${sys.get_env("CLOUD_FUNCTION_URL")}
+                - iterationValues: ${text.split(sys.get_env("ITERATION_VALUES"), ",")}
+                - concurrencyLimit: 20
+        - parallelCalls:
+            parallel:
+                exception_policy: continueAll
+                concurrency_limit: ${concurrencyLimit}
+                for:
+                    value: value
+                    index: index
+                    in: ${iterationValues}
+
+                    steps:
+                        - master:
+                            try:
+                                steps:
+                                    - callCloudFunction:
+                                        call: http.get
+                                        args:
+                                            url: ${cloudFunctionUrl}
+                                            query:
+                                                endpoint: ${value}
+                                            auth:
+                                                type: OIDC
+                                        result: response
+                                    - logSuccess:
+                                        call: sys.log
+                                        args:
+                                            severity: "INFO"
+                                            json:
+                                                message: ${value}
+                                                response: ${response}
+                            retry: ${http.default_retry}
+                            except:
+                                as: e
+                                steps:
+                                    - logError:
+                                        call: sys.log
+                                        args:
+                                            severity: "ERROR"
+                                            json:
+                                                error_info:
+                                                    code: ${e.code}
+                                                    message: ${e.message}
