@@ -1,35 +1,76 @@
 main:
   params: [event]
   steps:
-    - read_blob_metadata:
-        call: googleapis.storage.v1.objects.get
-        args:
-          bucket: ${event.data.bucket}
-          object: ${text.url_encode(event.data.name)}
-        result: blob
-    - set_variables:
+    # Asigna las variables
+    - init:
         assign:
-          - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
-          - job_name: ${blob["metadata"]["job_name"]}
-          - job_location: ${sys.get_env("GOOGLE_CLOUD_LOCATION")}
-          - proceso_id: ${blob["metadata"]["proceso_id"]}
-    - run_job:
+          - projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - location: ${sys.get_env("GOOGLE_CLOUD_LOCATION")}
+          - jobName: ${sys.get_env("CLOUD_RUN_JOB")}
+          - destinationProject: ${sys.get_env("DESTINATION_PROJECT")}
+          - destinationDataset: ${sys.get_env("DESTINATION_DATASET")}
+          - processId: ${text.find_all_regex(text.to_lower(event.data.name), "[[:alpha:]_-]+.[0-9]{4}-[0-9]{2}-[0-9]{2}")[0].match}
+          - tableName: ${text.split(processId, ".")[0]}
+          - processDate: ${text.split(processId, ".")[1]}
+    # Elimina los datos de la tabla por re-proceso.
+    # En caso de que no exista la tabla maneja el error.
+    - deleteWhere:
+        try:
+          call: googleapis.bigquery.v2.jobs.query
+          args:
+              projectId: ${projectId}
+              body:
+                  location: ${location}
+                  useLegacySql: false
+                  defaultDataset:
+                      datasetId: ${destinationDataset}
+                      projectId: ${destinationProject}
+                  query: '${
+                          "DELETE 
+                          FROM `" + tableName + "`
+                          WHERE proceso_task_id = \"" + processId + "\""
+                          }'
+        except:
+          as: e
+          steps:
+            - handleErros:
+                switch:
+                  - condition: ${e.body.error.status == "NOT_FOUND"}
+                    steps:
+                      - warnNotExists:
+                          call: sys.log
+                          args:
+                            severity: "WARNING"
+                            json:
+                              message: '${"Tabla: " + tableName + " no existe."}'
+                              context:
+                                nivel_1: ${processId}
+                          next: runJob
+            - unhandled_exception:
+                raise: ${e}
+    - runJob:
         call: googleapis.run.v1.namespaces.jobs.run
         args:
-          name: ${"namespaces/" + project_id + "/jobs/" + job_name}
-          location: ${job_location}
+          name: ${"namespaces/" + projectId + "/jobs/" + jobName}
+          location: ${location}
           body:
             overrides:
               containerOverrides:
-                  env:
-                    - name: "PROCESO_ID"
-                      value: ${proceso_id}
-                    - name: "INPUT_FILE"
-                      value: ${"gs://" + event.data.bucket + "/" + event.data.name}
+                env:
+                  - name: "PROCESS_ID"
+                    value: ${processId}
+                  - name: "INPUT_BUCKET"
+                    value: ${event.data.bucket}
+                  - name: "INPUT_FILENAME"
+                    value: ${event.data.name}
+                  - name: "OUTPUT_PROJECT"
+                    value: ${destinationProject}
+                  - name: "OUTPUT_DATASET"
+                    value: ${destinationDataset}
           connector_params:
             polling_policy:
               initial_delay: 30
-              multiplier: 1.20
+              multiplier: 1.5
               max_delay: 60
             skip_polling: false
-        result: job_execution
+        next: end
